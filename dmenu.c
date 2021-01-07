@@ -25,6 +25,8 @@
                              * MAX(0, MIN((y)+(h),(r).y_org+(r).height) - MAX((y),(r).y_org)))
 #define LENGTH(X)             (sizeof X / sizeof X[0])
 #define TEXTW(X)              (drw_fontset_getwidth(drw, (X)) + lrpad)
+#define NUMBERSMAXDIGITS      100
+#define NUMBERSBUFSIZE        (NUMBERSMAXDIGITS * 2) + 1
 
 /* enums */
 enum { SchemeNorm, SchemeSel, SchemeOut, SchemeNormHighlight, SchemeSelHighlight, SchemeMid, SchemeLast }; /* color schemes */
@@ -35,6 +37,7 @@ struct item {
     int out;
 };
 
+static char numbers[NUMBERSBUFSIZE] = "";
 static char text[BUFSIZ] = "";
 static char *embed;
 static int bh, mw, mh;
@@ -151,13 +154,29 @@ drawhighlights(struct item *item, int x, int y, int maxw)
     }
 }
 
+static void
+recalculatenumbers()
+{
+    unsigned int numer = 0, denom = 0;
+    struct item *item;
+    if (matchend) {
+        numer++;
+        for (item = matchend; item && item->left; item = item->left)
+            numer++;
+    }
+    for (item = items; item && item->text; item++)
+        denom++;
+    snprintf(numbers, NUMBERSBUFSIZE, "%d/%d", numer, denom);
+}
+
+
 static int
 drawitem(struct item *item, int x, int y, int w)
 {
     if (item == sel)
         drw_setscheme(drw, scheme[SchemeSel]);
-	else if (item->left == sel || item->right == sel)
-		drw_setscheme(drw, scheme[SchemeMid]);
+    else if (item->left == sel || item->right == sel)
+        drw_setscheme(drw, scheme[SchemeMid]);
     else if (item->out)
         drw_setscheme(drw, scheme[SchemeOut]);
     else
@@ -193,6 +212,7 @@ drawmenu(void)
         drw_rect(drw, x + curpos, 2 + (bh - fh) / 2, 2, fh - 4, 1, 0);
     }
 
+    recalculatenumbers();
     if (lines > 0) {
         /* draw grid */
         int i = 0;
@@ -213,13 +233,15 @@ drawmenu(void)
         }
         x += w;
         for (item = curr; item != next; item = item->right)
-            x = drawitem(item, x, 0, MIN(TEXTW(item->text), mw - x - TEXTW(">")));
+            x = drawitem(item, x, 0, MIN(TEXTW(item->text), mw - x - TEXTW(">") - TEXTW(numbers)));
         if (next) {
             w = TEXTW(">");
             drw_setscheme(drw, scheme[SchemeNorm]);
-            drw_text(drw, mw - w, 0, w, bh, lrpad / 2, ">", 0);
+            drw_text(drw, mw - w - TEXTW(numbers), 0, w, bh, lrpad / 2, ">", 0);
         }
     }
+    drw_setscheme(drw, scheme[SchemeNorm]);
+    drw_text(drw, mw - TEXTW(numbers), 0, TEXTW(numbers), bh, lrpad / 2, numbers, 0);
     drw_map(drw, win, 0, 0, mw, mh);
 }
 
@@ -359,9 +381,9 @@ keypress(XKeyEvent *ev)
     int len;
     KeySym ksym;
     Status status;
-	int i;
-	struct item *tmpsel;
-	bool offscreen = false;
+    int i;
+    struct item *tmpsel;
+    bool offscreen = false;
 
     len = XmbLookupString(xic, ev, buf, sizeof buf, &ksym, &status);
     switch (status) {
@@ -488,24 +510,24 @@ insert:
         calcoffsets();
         break;
     case XK_Left:
-		if (columns > 1) {
-			if (!sel)
-				return;
-			tmpsel = sel;
-			for (i = 0; i < lines; i++) {
-				if (!tmpsel->left ||  tmpsel->left->right != tmpsel)
-					return;
-				if (tmpsel == curr)
-					offscreen = true;
-				tmpsel = tmpsel->left;
-			}
-			sel = tmpsel;
-			if (offscreen) {
-				curr = prev;
-				calcoffsets();
-			}
-			break;
-		}
+        if (columns > 1) {
+            if (!sel)
+                return;
+            tmpsel = sel;
+            for (i = 0; i < lines; i++) {
+                if (!tmpsel->left ||  tmpsel->left->right != tmpsel)
+                    return;
+                if (tmpsel == curr)
+                    offscreen = true;
+                tmpsel = tmpsel->left;
+            }
+            sel = tmpsel;
+            if (offscreen) {
+                curr = prev;
+                calcoffsets();
+            }
+            break;
+        }
         if (cursor > 0 && (!sel || !sel->left || lines > 0)) {
             cursor = nextrune(-1);
             break;
@@ -542,24 +564,24 @@ insert:
             sel->out = 1;
         break;
     case XK_Right:
-		if (columns > 1) {
-			if (!sel)
-				return;
-			tmpsel = sel;
-			for (i = 0; i < lines; i++) {
-				if (!tmpsel->right ||  tmpsel->right->left != tmpsel)
-					return;
-				tmpsel = tmpsel->right;
-				if (tmpsel == next)
-					offscreen = true;
-			}
-			sel = tmpsel;
-			if (offscreen) {
-				curr = next;
-				calcoffsets();
-			}
-			break;
-		}
+        if (columns > 1) {
+            if (!sel)
+                return;
+            tmpsel = sel;
+            for (i = 0; i < lines; i++) {
+                if (!tmpsel->right ||  tmpsel->right->left != tmpsel)
+                    return;
+                tmpsel = tmpsel->right;
+                if (tmpsel == next)
+                    offscreen = true;
+            }
+            sel = tmpsel;
+            if (offscreen) {
+                curr = next;
+                calcoffsets();
+            }
+            break;
+        }
         if (text[cursor] != '\0') {
             cursor = nextrune(+1);
             break;
@@ -783,8 +805,8 @@ static void
 usage(void)
 {
     fputs("usage: dmenu [-bfiv] [-l lines] [-h height] [-p prompt] [-fn font] [-m monitor]\n"
-	      "             [-nb color] [-nf color] [-sb color] [-sf color] [-w windowid]\n"
-	      "             [-it text]\n", stderr);
+          "             [-nb color] [-nf color] [-sb color] [-sf color] [-w windowid]\n"
+          "             [-it text]\n", stderr);
     exit(1);
 }
 
@@ -835,10 +857,10 @@ main(int argc, char *argv[])
             colors[SchemeSel][ColFg] = argv[++i];
         else if (!strcmp(argv[i], "-w"))   /* embedding window id */
             embed = argv[++i];
-		else if (!strcmp(argv[i], "-it")) {   /* embedding window id */
-			const char * text = argv[++i];
-			insert(text, strlen(text));
-		} else
+        else if (!strcmp(argv[i], "-it")) {   /* embedding window id */
+            const char * text = argv[++i];
+            insert(text, strlen(text));
+        } else
             usage();
 
     if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
